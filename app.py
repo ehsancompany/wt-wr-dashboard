@@ -4,7 +4,7 @@ Willy (WR21+EMA13) only — STD removed
 UTC+2 timestamps on x-axis
 Run: python app.py
 """
-
+import os
 import ccxt
 import numpy as np
 import threading
@@ -610,15 +610,10 @@ function setUpdateInterval(sec) {
 </html>
 '''
 
-if __name__ == '__main__':
-    threading.Thread(target=update_loop, daemon=True).start()
-    print("🌐 WT + Willy Dashboard at http://localhost:5001")
-    # app.run(debug=False, port=5001)
-    import os
+# ✅ start background loop (for Render / gunicorn)
+threading.Thread(target=update_loop, daemon=True).start()
 
 if __name__ == '__main__':
-    threading.Thread(target=update_loop, daemon=True).start()
     print("🌐 WT + WR Dashboard starting...")
-
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
