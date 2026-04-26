@@ -170,34 +170,30 @@ def fetch_tf(coin, tf):
 
 
 # ─── Background loop ──────────────────────────────────────────
+from concurrent.futures import ThreadPoolExecutor
+
 def fetch_all_parallel(coin):
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     results = {}
+
+    def safe_fetch(tf):
+        try:
+            return tf, fetch_tf(coin, tf)
+        except Exception as e:
+            print("❌ ERROR:", tf, str(e))
+            return tf, None
+
     with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(fetch_tf, coin, tf): tf for tf in TIMEFRAMES}
-        for future in as_completed(futures):
-            tf = futures[future]
+        futures = [executor.submit(safe_fetch, tf) for tf in TIMEFRAMES]
+
+        for future in futures:
             try:
-                r = future.result()
+                tf, r = future.result(timeout=8)   # ⏱️ مهم
                 if r:
                     results[tf] = r
-            except Exception:
-                pass
+            except Exception as e:
+                print("❌ TIMEOUT:", str(e))
+
     return results
-
-def update_loop():
-    while True:
-        try:
-            state['loading']      = True
-            state['data']         = fetch_all_parallel(state['coin'])
-            state['last_updated'] = datetime.now(UTC2).strftime('%H:%M:%S')
-            state['error']        = ''
-        except Exception as e:
-            state['error'] = str(e)
-        finally:
-            state['loading'] = False
-        time.sleep(max(1, state['interval']))
-
 
 # ─── Routes ───────────────────────────────────────────────────
 @app.route('/')
