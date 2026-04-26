@@ -22,8 +22,11 @@ COINS      = [
 TIMEFRAMES = ['1m', '3m', '5m', '15m', '1h']
 LIMIT      = 500   # increased from 100 — needed for WT warmup
 
-exchange = ccxt.binance({'enableRateLimit': True})
-
+exchange = ccxt.binance({
+    'enableRateLimit': True,
+    'timeout': 10000,   
+    'options': {'defaultType': 'spot'},
+})
 UTC2 = timezone(timedelta(hours=2))
 
 state = {
@@ -100,62 +103,70 @@ def williams_r_willy(highs, lows, closes, period=21, ema_period=13):
 
 # ─── Fetch one timeframe ──────────────────────────────────────
 def fetch_tf(coin, tf):
-    ohlcv = exchange.fetch_ohlcv(coin, timeframe=tf, limit=LIMIT)
+    try:
+        ohlcv = exchange.fetch_ohlcv(coin, timeframe=tf, limit=LIMIT)
+    except Exception as e:
+        print("❌ FETCH ERROR:", coin, tf, str(e))
+        return None
+
     if not ohlcv:
         return None
 
-    ts     = [o[0] for o in ohlcv]
-    highs  = [o[2] for o in ohlcv]
-    lows   = [o[3] for o in ohlcv]
-    closes = [o[4] for o in ohlcv]
+    try:
+        ts     = [o[0] for o in ohlcv]
+        highs  = [o[2] for o in ohlcv]
+        lows   = [o[3] for o in ohlcv]
+        closes = [o[4] for o in ohlcv]
 
-    wt1, wt2                = wavetrend_lazybear(highs, lows, closes)
-    willy_raw, willy_smooth = williams_r_willy(highs, lows, closes)
+        wt1, wt2                = wavetrend_lazybear(highs, lows, closes)
+        willy_raw, willy_smooth = williams_r_willy(highs, lows, closes)
 
-    pad = len(closes) - len(wt1)
-    wt1 = [None] * pad + wt1
-    wt2 = [None] * pad + wt2
+        pad = len(closes) - len(wt1)
+        wt1 = [None] * pad + wt1
+        wt2 = [None] * pad + wt2
 
-    cur_wt1 = wt1[-1] if wt1[-1] is not None else 0
-    cur_wt2 = wt2[-1] if wt2[-1] is not None else 0
+        cur_wt1 = wt1[-1] if wt1 and wt1[-1] is not None else 0
+        cur_wt2 = wt2[-1] if wt2 and wt2[-1] is not None else 0
 
-    def wr_sig(w):
-        if w is None: return 'neutral'
-        if w < -80:   return 'oversold'
-        if w > -20:   return 'overbought'
-        return 'neutral'
+        def wr_sig(w):
+            if w is None: return 'neutral'
+            if w < -80:   return 'oversold'
+            if w > -20:   return 'overbought'
+            return 'neutral'
 
-    def wt_sig(w1, w2):
-        if w1 is None or w2 is None: return 'neutral'
-        if w1 > w2 and w1 < -53:    return 'buy'
-        if w1 < w2 and w1 > 53:     return 'sell'
-        return 'neutral'
+        def wt_sig(w1, w2):
+            if w1 is None or w2 is None: return 'neutral'
+            if w1 > w2 and w1 < -53:    return 'buy'
+            if w1 < w2 and w1 > 53:     return 'sell'
+            return 'neutral'
 
-    # UTC+2 labels
-    def fmt_label(ts_ms, tf):
-        dt = datetime.fromtimestamp(ts_ms / 1000, tz=UTC2)
-        if tf == '1h':
-            return dt.strftime('%m/%d %H:%M')
-        return dt.strftime('%H:%M')
+        def fmt_label(ts_ms, tf):
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=UTC2)
+            if tf == '1h':
+                return dt.strftime('%m/%d %H:%M')
+            return dt.strftime('%H:%M')
 
-    labels = [fmt_label(t, tf) for t in ts]
+        labels = [fmt_label(t, tf) for t in ts]
 
-    return {
-        'labels':        labels,
-        'closes':        closes,
-        'wt1':           wt1,
-        'wt2':           wt2,
-        'cur_wt1':       round(cur_wt1, 2),
-        'cur_wt2':       round(cur_wt2, 2),
-        'wt_signal':     wt_sig(cur_wt1, cur_wt2),
-        # The Willy WR(21)+EMA(13)
-        'willy_raw':     willy_raw,
-        'willy_smooth':  willy_smooth,
-        'cur_willy':     round(willy_raw[-1], 2)    if willy_raw    and willy_raw[-1]    is not None else -50,
-        'cur_willy_ema': round(willy_smooth[-1], 2) if willy_smooth and willy_smooth[-1] is not None else -50,
-        'willy_signal':  wr_sig(willy_raw[-1] if willy_raw else None),
-        'price':         closes[-1] if closes else 0,
-    }
+        return {
+            'labels':        labels,
+            'closes':        closes,
+            'wt1':           wt1,
+            'wt2':           wt2,
+            'cur_wt1':       round(cur_wt1, 2),
+            'cur_wt2':       round(cur_wt2, 2),
+            'wt_signal':     wt_sig(cur_wt1, cur_wt2),
+            'willy_raw':     willy_raw,
+            'willy_smooth':  willy_smooth,
+            'cur_willy':     round(willy_raw[-1], 2)    if willy_raw    and willy_raw[-1]    is not None else -50,
+            'cur_willy_ema': round(willy_smooth[-1], 2) if willy_smooth and willy_smooth[-1] is not None else -50,
+            'willy_signal':  wr_sig(willy_raw[-1] if willy_raw else None),
+            'price':         closes[-1] if closes else 0,
+        }
+
+    except Exception as e:
+        print("❌ PROCESS ERROR:", coin, tf, str(e))
+        return None
 
 
 # ─── Background loop ──────────────────────────────────────────
